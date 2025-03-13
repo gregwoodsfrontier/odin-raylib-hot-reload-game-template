@@ -29,12 +29,14 @@ package game
 
 import "core:fmt"
 import "core:math/linalg"
+import "core:math/rand"
 import rl "vendor:raylib"
 
 PIXEL_WINDOW_HEIGHT :: 180
 BACKGROUND_SCALE :: 2
 ENTITY_SCALE :: 4
-MAX_POOL_SIZE :: 4000
+MAX_POOL_SIZE :: 100
+SPAWN_RATE :: 0.75
 BlockPool :: struct {
     slots:         [MAX_POOL_SIZE]Slot,
     next_free_idx: int, // points to the next free slot
@@ -80,6 +82,8 @@ Player :: struct {
 	frame_coords: [2]int,
 }
 Game_Memory :: struct {
+	spawn_timer: f32,
+	block_pool: BlockPool,
 	bg_scroll_vec: rl.Vector2,
 	bg_pos: [2]rl.Vector2,
 	bg_texture: rl.Texture,
@@ -112,7 +116,52 @@ ui_camera :: proc() -> rl.Camera2D {
 	}
 }
 
+block_pool_add :: proc(block: Roadblock) -> (id: BlockId) {
+	using pool := g_mem.block_pool
+    if next_free_idx == n_slots_used {
+        // add new bullet to the end because all slots[0..n_slots_used] are occupied by bullets, 
+        if n_slots_used == MAX_POOL_SIZE do return -1
+
+        id = BlockId(n_slots_used)
+        slots[id] = block
+        pool.n_slots_used += 1
+        pool.next_free_idx += 1
+    } else {
+        // put the bullet in the next free slot:
+        id = BlockId(next_free_idx)
+        slot := &slots[id]
+        pool.next_free_idx = slot.(int) or_else panic("slot should contain int!") // slots form linked list
+        slot^ = block
+    }
+    return id
+}
+
 update :: proc() {
+	// update the spawn road block timer
+	g_mem.spawn_timer -= rl.GetFrameTime()
+
+	if g_mem.spawn_timer <= 0 {
+		// spawn a road block when time is up
+		rad_f := rand.float32() * 0.5
+		rb := Roadblock{
+			pos = {
+				f32(rl.GetScreenWidth()) * (0.2 + rad_f),
+				f32(rl.GetScreenHeight() + 32)
+			},
+			vec = g_mem.bg_scroll_vec,
+			type = .TREE,
+		}
+		rb.body = rl.Rectangle {
+			x = rb.pos.x,
+			y = rb.pos.y,
+			width = 16 * ENTITY_SCALE,
+			height = 16 * ENTITY_SCALE,
+		}
+		block_pool_add(rb)
+		// resets the timer back to spawn rate
+		g_mem.spawn_timer += SPAWN_RATE + g_mem.spawn_timer
+	}
+
 	input: rl.Vector2
 
 	if rl.IsKeyDown(.UP) || rl.IsKeyDown(.W) {
@@ -142,9 +191,21 @@ update :: proc() {
 		g_mem.bg_pos[BG_SIDE.BOTTOM].y = f32(g_mem.bg_texture.height) * BACKGROUND_SCALE
 	}
 
+	// scroll the background ski
 	for &bgPos in g_mem.bg_pos {
 		bgPos += g_mem.bg_scroll_vec * rl.GetFrameTime()
 	}
+
+	// update all road block position in pool
+	for &slot in g_mem.block_pool.slots {
+		if blk, ok := slot.(Roadblock); ok {
+			blk.pos += blk.vec * rl.GetFrameTime()
+		}
+	}
+}
+
+draw_roadblocks :: proc() {
+
 }
 
 draw_player :: proc() {
@@ -217,9 +278,10 @@ draw :: proc() {
 
 	// rl.BeginMode2D(game_camera())
 	draw_player()
+	draw_roadblocks()
 	// rl.DrawTextureEx(g_mem.player_texture, g_mem.player_pos, 0, 1, rl.WHITE)
-	rl.DrawRectangleV({520, 520}, {10, 10}, rl.RED)
-	rl.DrawRectangleV({530, 520}, {10, 10}, rl.GREEN)
+	// rl.DrawRectangleV({520, 520}, {10, 10}, rl.RED)
+	// rl.DrawRectangleV({530, 520}, {10, 10}, rl.GREEN)
 
 
 	// rl.EndMode2D()
@@ -266,13 +328,17 @@ game_init :: proc() {
 		player_frame_coords = {10, 6},
 		frame_size = 16,
 		player_pos = {f32(rl.GetScreenWidth()/2) - 16/2*ENTITY_SCALE, f32(rl.GetScreenHeight())*0.2 - - 16/2*ENTITY_SCALE},
-		player_vec = 100.00,
+		player_vec = 250.00,
 		bg_texture = rl.LoadTexture("assets/ski-world.png"),
 		bg_pos = {
 			{0, 0},
 			{0, f32(rl.GetScreenHeight())},
 		},
 		bg_scroll_vec = {0, -200},
+		block_pool = {
+			n_slots_used = 0,
+			next_free_idx = 0,
+		}
 	}
 
 	game_hot_reloaded(g_mem)
