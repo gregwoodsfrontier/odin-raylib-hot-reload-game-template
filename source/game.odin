@@ -36,7 +36,7 @@ PIXEL_WINDOW_HEIGHT :: 180
 BACKGROUND_SCALE :: 2
 ENTITY_SCALE :: 4
 MAX_POOL_SIZE :: 100
-SPAWN_RATE :: 0.75
+SPAWN_RATE :: 2.0
 BlockPool :: struct {
     slots:         [MAX_POOL_SIZE]Slot,
     next_free_idx: int, // points to the next free slot
@@ -116,8 +116,8 @@ ui_camera :: proc() -> rl.Camera2D {
 	}
 }
 
-block_pool_add :: proc(block: Roadblock) -> (id: BlockId) {
-	using pool := g_mem.block_pool
+block_pool_add :: proc(using pool : ^BlockPool, block: Roadblock) -> (id: BlockId) {
+	
     if next_free_idx == n_slots_used {
         // add new bullet to the end because all slots[0..n_slots_used] are occupied by bullets, 
         if n_slots_used == MAX_POOL_SIZE do return -1
@@ -142,11 +142,11 @@ update :: proc() {
 
 	if g_mem.spawn_timer <= 0 {
 		// spawn a road block when time is up
-		rad_f := rand.float32() * 0.5
+		rad_f := rand.float32() * 0.2
 		rb := Roadblock{
 			pos = {
 				f32(rl.GetScreenWidth()) * (0.2 + rad_f),
-				f32(rl.GetScreenHeight() + 32)
+				f32(rl.GetScreenHeight())*0.5,
 			},
 			vec = g_mem.bg_scroll_vec,
 			type = .TREE,
@@ -157,7 +157,7 @@ update :: proc() {
 			width = 16 * ENTITY_SCALE,
 			height = 16 * ENTITY_SCALE,
 		}
-		block_pool_add(rb)
+		block_pool_add(&g_mem.block_pool ,rb)
 		// resets the timer back to spawn rate
 		g_mem.spawn_timer += SPAWN_RATE + g_mem.spawn_timer
 	}
@@ -198,14 +198,20 @@ update :: proc() {
 
 	// update all road block position in pool
 	for &slot in g_mem.block_pool.slots {
-		if blk, ok := slot.(Roadblock); ok {
+		if blk, ok :=  &slot.(Roadblock); ok {
 			blk.pos += blk.vec * rl.GetFrameTime()
+			blk.body.x, blk.body.y = blk.pos.x, blk.pos.y
 		}
 	}
 }
 
 draw_roadblocks :: proc() {
-
+	pl := g_mem.block_pool.slots
+	for slot in pl {
+		if blk, ok := slot.(Roadblock); ok {
+			rl.DrawRectangleRec(blk.body, rl.YELLOW)
+		}
+	}
 }
 
 draw_player :: proc() {
@@ -291,7 +297,9 @@ draw :: proc() {
 	// NOTE: `fmt.ctprintf` uses the temp allocator. The temp allocator is
 	// cleared at the end of the frame by the main application, meaning inside
 	// `main_hot_reload.odin`, `main_release.odin` or `main_web_entry.odin`.
+	t, t_ok := g_mem.block_pool.slots[0].(Roadblock)
 	rl.DrawText(fmt.ctprintf("some_number: %v\nplayer_pos: %v", g_mem.some_number, g_mem.player_pos), 5, 5, 8, rl.WHITE)
+	rl.DrawText(fmt.ctprintf("pool_vec: %v", t_ok ? t.vec.y : -1), 5, 25, 8, rl.WHITE)
 
 	rl.EndMode2D()
 
@@ -334,11 +342,11 @@ game_init :: proc() {
 			{0, 0},
 			{0, f32(rl.GetScreenHeight())},
 		},
-		bg_scroll_vec = {0, -200},
+		bg_scroll_vec = {0, -180},
 		block_pool = {
 			n_slots_used = 0,
 			next_free_idx = 0,
-		}
+		},
 	}
 
 	game_hot_reloaded(g_mem)
