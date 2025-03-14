@@ -30,6 +30,7 @@ package game
 import "core:fmt"
 import "core:math/linalg"
 import "core:math/rand"
+import "core:slice"
 import rl "vendor:raylib"
 
 PIXEL_WINDOW_HEIGHT :: 180
@@ -37,16 +38,6 @@ BACKGROUND_SCALE :: 2
 ENTITY_SCALE :: 4
 MAX_POOL_SIZE :: 100
 SPAWN_RATE :: 1.0
-BlockPool :: struct {
-    slots:         [MAX_POOL_SIZE]Slot,
-    next_free_idx: int, // points to the next free slot
-    n_slots_used:  int, // number of slots that are occupied by an int or a Bullet
-}
-
-Slot :: union #no_nil {
-    int,    // points at next free slot idx
-    Roadblock, // stores roadblock data
-}
 
 BlockType :: enum {
 	TREE,
@@ -55,15 +46,16 @@ BlockType :: enum {
 	BIG_TREE,
 	BIG_BRANCH,
 }
+
+BlockId :: distinct int
 Roadblock :: struct {
     pos : rl.Vector2,
 	vec: rl.Vector2,
 	type: BlockType,
 	body: rl.Rectangle,
 	id: BlockId,
+	active: bool,
 }
-
-BlockId :: distinct int // just an index into the bullet pool
 
 BG :: struct {
 	scroll_vec: rl.Vector2,
@@ -84,7 +76,9 @@ Player :: struct {
 }
 Game_Memory :: struct {
 	spawn_timer: f32,
-	block_pool: BlockPool,
+	roadblocks: [MAX_POOL_SIZE]Roadblock,
+	pool_active_num: int,
+	rb_id: BlockId,
 	bg_scroll_vec: rl.Vector2,
 	bg_pos: [2]rl.Vector2,
 	bg_texture: rl.Texture,
@@ -117,29 +111,50 @@ ui_camera :: proc() -> rl.Camera2D {
 	}
 }
 
+spawn_roadblock :: proc() {
+	for &blk in g_mem.roadblocks {
+		// find the first inactive block and activate it
+		if !blk.active {
+			rad_f := rand.float32() * 0.2
+			blk.pos = {
+				f32(rl.GetScreenWidth()) * (0.2 + rad_f),
+				f32(rl.GetScreenHeight())*0.5,
+			}
+			blk.vec = g_mem.bg_scroll_vec
+			blk.type = .TREE
+			blk.body = rl.Rectangle {
+				x = blk.pos.x,
+				y = blk.pos.y,
+				width = 16 * ENTITY_SCALE,
+				height = 16 * ENTITY_SCALE,
+			}
+			blk.id = g_mem.rb_id
+			blk.active = true
+			g_mem.rb_id += 1
+			break
+		}
+	}
+}
+
+despawn_roadblock :: proc(id: BlockId) {
+	// find the specific element with same id and deactivate it. zero everything ?
+	for &e in g_mem.roadblocks {
+		if(e.id == id) {
+			e.active = false
+			e.pos = {0,0}
+			e.vec = {0,0}
+			e.body = rl.Rectangle {0,0,0,0}
+			break
+		}
+	}
+}
+
 update :: proc() {
 	// update the spawn road block timer
 	g_mem.spawn_timer -= rl.GetFrameTime()
 
 	if g_mem.spawn_timer <= 0 {
-		// spawn a road block when time is up
-		rad_f := rand.float32() * 0.2
-		rb := Roadblock{
-			pos = {
-				f32(rl.GetScreenWidth()) * (0.2 + rad_f),
-				f32(rl.GetScreenHeight())*0.5,
-			},
-			vec = g_mem.bg_scroll_vec,
-			type = .TREE,
-		}
-		rb.body = rl.Rectangle {
-			x = rb.pos.x,
-			y = rb.pos.y,
-			width = 16 * ENTITY_SCALE,
-			height = 16 * ENTITY_SCALE,
-		}
-		rb.id = block_pool_add(&g_mem.block_pool ,rb)
-		fmt.print("id: ", rb.id, "\n")
+		spawn_roadblock()
 		// resets the timer back to spawn rate
 		g_mem.spawn_timer += SPAWN_RATE + g_mem.spawn_timer
 	}
@@ -178,25 +193,30 @@ update :: proc() {
 		bgPos += g_mem.bg_scroll_vec * rl.GetFrameTime()
 	}
 
+	for &el in g_mem.roadblocks {
+		if(el.active) {
+			el.pos += el.vec * rl.GetFrameTime()
+			el.body.x = el.pos.x
+			el.body.y = el.pos.y
+
+			// remove roadblock if offscreen
+			if el.pos.y <= 10 {
+				despawn_roadblock(el.id)
+			}
+		}
+	}
 	
-	// for &slot in g_mem.block_pool.slots[:g_mem.block_pool.n_slots_used] {
-	// 	if blk, ok :=  &slot.(Roadblock); ok {
-	// 		// update all road block position in pool
-	// 		blk.pos += blk.vec * rl.GetFrameTime()
-	// 		blk.body.x, blk.body.y = blk.pos.x, blk.pos.y
-	// 		// remove all road block that is about to off-screen
-	// 		if blk.pos.y <= 0 {
-	// 			block_pool_remove(&g_mem.block_pool, blk.id)
-	// 		}
-	// 	}
-	// }
+	// count the number of active rb
+	is_active :: proc(el: Roadblock) -> bool {
+		return el.active
+	}
+	g_mem.pool_active_num = slice.count_proc(g_mem.roadblocks[:], is_active)
 }
 
 draw_roadblocks :: proc() {
-	pl := g_mem.block_pool.slots[:g_mem.block_pool.n_slots_used]
-	for slot in pl {
-		if blk, ok := slot.(Roadblock); ok {
-			rl.DrawRectangleRec(blk.body, rl.YELLOW)
+	for el in g_mem.roadblocks {
+		if(el.active) {
+			rl.DrawRectangleRec(el.body, rl.YELLOW)
 		}
 	}
 }
@@ -271,7 +291,7 @@ draw :: proc() {
 
 	// rl.BeginMode2D(game_camera())
 	draw_player()
-	// draw_roadblocks()
+	draw_roadblocks()
 
 
 	// rl.EndMode2D()
@@ -281,10 +301,9 @@ draw :: proc() {
 	// NOTE: `fmt.ctprintf` uses the temp allocator. The temp allocator is
 	// cleared at the end of the frame by the main application, meaning inside
 	// `main_hot_reload.odin`, `main_release.odin` or `main_web_entry.odin`.
-	t := g_mem.block_pool.next_free_idx
-	n := g_mem.block_pool.n_slots_used
-	rl.DrawText(fmt.ctprintf("some_number: %v\nplayer_pos: %v", g_mem.some_number, g_mem.player_pos), 5, 5, 8, rl.WHITE)
-	rl.DrawText(fmt.ctprintf("next_free_idx: %v\nn_slots_used: %v", t, n), 5, 25, 8, rl.WHITE)
+	
+	rl.DrawText(fmt.ctprintf("active_rb: %v\nplayer_pos: %v", g_mem.pool_active_num, g_mem.player_pos), 5, 5, 8, rl.WHITE)
+	
 
 	rl.EndMode2D()
 
@@ -328,10 +347,7 @@ game_init :: proc() {
 			{0, f32(rl.GetScreenHeight())},
 		},
 		bg_scroll_vec = {0, -180},
-		block_pool = {
-			n_slots_used = 0,
-			next_free_idx = 0,
-		},
+		rb_id = 0,
 	}
 
 	game_hot_reloaded(g_mem)
