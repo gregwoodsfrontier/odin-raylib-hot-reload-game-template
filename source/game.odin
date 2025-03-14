@@ -116,6 +116,22 @@ ui_camera :: proc() -> rl.Camera2D {
 	}
 }
 
+block_pool_remove :: proc(using pool: ^BlockPool, id: BlockId) -> (bullet: Roadblock, success: bool) {
+    if id < 0 || int(id) >= n_slots_used {
+        return {}, false
+    }
+    slot := &slots[id]
+    if bullet_in_slot, ok := slot.(Roadblock); ok {
+        // use this slot as an element in the linked list of free slots
+        slot^ = pool.next_free_idx
+        pool.next_free_idx = int(id)
+        return bullet_in_slot, true
+    } else {
+        // unexptected, bullet id does not point to occupied slot
+        return {}, false
+    }
+}
+
 block_pool_add :: proc(using pool : ^BlockPool, block: Roadblock) -> (id: BlockId) {
 	
     if next_free_idx == n_slots_used {
