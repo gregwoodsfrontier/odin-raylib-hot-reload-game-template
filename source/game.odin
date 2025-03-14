@@ -321,7 +321,7 @@ draw :: proc() {
 	n_a := g_mem.block_pool.next_free_idx
 	n_b := g_mem.block_pool.n_slots_used
 	rl.DrawText(fmt.ctprintf("some_number: %v\nplayer_pos: %v", g_mem.some_number, g_mem.player_pos), 5, 5, 8, rl.WHITE)
-	rl.DrawText(fmt.ctprintf("next_free: %v\nslots_used: %v", n_a, n_b), 5, 25, 8, rl.WHITE)
+	rl.DrawText(fmt.ctprintf("next_free: %v\nslots_used: %v", n_a, n_b), 5, 25, 8, rl.RED)
 
 	rl.EndMode2D()
 
