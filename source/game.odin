@@ -36,7 +36,7 @@ PIXEL_WINDOW_HEIGHT :: 180
 BACKGROUND_SCALE :: 2
 ENTITY_SCALE :: 4
 MAX_POOL_SIZE :: 100
-SPAWN_RATE :: 2.0
+SPAWN_RATE :: 1.0
 BlockPool :: struct {
     slots:         [MAX_POOL_SIZE]Slot,
     next_free_idx: int, // points to the next free slot
@@ -60,6 +60,7 @@ Roadblock :: struct {
 	vec: rl.Vector2,
 	type: BlockType,
 	body: rl.Rectangle,
+	id: BlockId,
 }
 
 BlockId :: distinct int // just an index into the bullet pool
@@ -116,26 +117,6 @@ ui_camera :: proc() -> rl.Camera2D {
 	}
 }
 
-block_pool_add :: proc(using pool : ^BlockPool, block: Roadblock) -> (id: BlockId) {
-	
-    if next_free_idx == n_slots_used {
-        // add new bullet to the end because all slots[0..n_slots_used] are occupied by bullets, 
-        if n_slots_used == MAX_POOL_SIZE do return -1
-
-        id = BlockId(n_slots_used)
-        slots[id] = block
-        pool.n_slots_used += 1
-        pool.next_free_idx += 1
-    } else {
-        // put the bullet in the next free slot:
-        id = BlockId(next_free_idx)
-        slot := &slots[id]
-        pool.next_free_idx = slot.(int) or_else panic("slot should contain int!") // slots form linked list
-        slot^ = block
-    }
-    return id
-}
-
 update :: proc() {
 	// update the spawn road block timer
 	g_mem.spawn_timer -= rl.GetFrameTime()
@@ -157,7 +138,8 @@ update :: proc() {
 			width = 16 * ENTITY_SCALE,
 			height = 16 * ENTITY_SCALE,
 		}
-		block_pool_add(&g_mem.block_pool ,rb)
+		rb.id = block_pool_add(&g_mem.block_pool ,rb)
+		fmt.print("id: ", rb.id, "\n")
 		// resets the timer back to spawn rate
 		g_mem.spawn_timer += SPAWN_RATE + g_mem.spawn_timer
 	}
@@ -196,17 +178,22 @@ update :: proc() {
 		bgPos += g_mem.bg_scroll_vec * rl.GetFrameTime()
 	}
 
-	// update all road block position in pool
-	for &slot in g_mem.block_pool.slots {
-		if blk, ok :=  &slot.(Roadblock); ok {
-			blk.pos += blk.vec * rl.GetFrameTime()
-			blk.body.x, blk.body.y = blk.pos.x, blk.pos.y
-		}
-	}
+	
+	// for &slot in g_mem.block_pool.slots[:g_mem.block_pool.n_slots_used] {
+	// 	if blk, ok :=  &slot.(Roadblock); ok {
+	// 		// update all road block position in pool
+	// 		blk.pos += blk.vec * rl.GetFrameTime()
+	// 		blk.body.x, blk.body.y = blk.pos.x, blk.pos.y
+	// 		// remove all road block that is about to off-screen
+	// 		if blk.pos.y <= 0 {
+	// 			block_pool_remove(&g_mem.block_pool, blk.id)
+	// 		}
+	// 	}
+	// }
 }
 
 draw_roadblocks :: proc() {
-	pl := g_mem.block_pool.slots
+	pl := g_mem.block_pool.slots[:g_mem.block_pool.n_slots_used]
 	for slot in pl {
 		if blk, ok := slot.(Roadblock); ok {
 			rl.DrawRectangleRec(blk.body, rl.YELLOW)
@@ -284,10 +271,7 @@ draw :: proc() {
 
 	// rl.BeginMode2D(game_camera())
 	draw_player()
-	draw_roadblocks()
-	// rl.DrawTextureEx(g_mem.player_texture, g_mem.player_pos, 0, 1, rl.WHITE)
-	// rl.DrawRectangleV({520, 520}, {10, 10}, rl.RED)
-	// rl.DrawRectangleV({530, 520}, {10, 10}, rl.GREEN)
+	// draw_roadblocks()
 
 
 	// rl.EndMode2D()
@@ -297,9 +281,10 @@ draw :: proc() {
 	// NOTE: `fmt.ctprintf` uses the temp allocator. The temp allocator is
 	// cleared at the end of the frame by the main application, meaning inside
 	// `main_hot_reload.odin`, `main_release.odin` or `main_web_entry.odin`.
-	t, t_ok := g_mem.block_pool.slots[0].(Roadblock)
+	t := g_mem.block_pool.next_free_idx
+	n := g_mem.block_pool.n_slots_used
 	rl.DrawText(fmt.ctprintf("some_number: %v\nplayer_pos: %v", g_mem.some_number, g_mem.player_pos), 5, 5, 8, rl.WHITE)
-	rl.DrawText(fmt.ctprintf("pool_vec: %v", t_ok ? t.vec.y : -1), 5, 25, 8, rl.WHITE)
+	rl.DrawText(fmt.ctprintf("next_free_idx: %v\nn_slots_used: %v", t, n), 5, 25, 8, rl.WHITE)
 
 	rl.EndMode2D()
 
