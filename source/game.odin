@@ -88,6 +88,8 @@ Game_Memory :: struct {
 	player_frame_coords: [2]int,
 	player_texture: rl.Texture,
 	player_vec: f32,
+	player_body: rl.Rectangle,
+	walls: [2]rl.Rectangle,
 	some_number: int,
 	run: bool,
 }
@@ -111,15 +113,11 @@ ui_camera :: proc() -> rl.Camera2D {
 	}
 }
 
-spawn_roadblock :: proc() {
+spawn_roadblock :: proc(_position: rl.Vector2) {
 	for &blk in g_mem.roadblocks {
 		// find the first inactive block and activate it
 		if !blk.active {
-			rad_f := rand.float32() * 0.2
-			blk.pos = {
-				f32(rl.GetScreenWidth()) * (0.2 + rad_f),
-				f32(rl.GetScreenHeight())*0.5,
-			}
+			blk.pos = _position
 			blk.vec = g_mem.bg_scroll_vec
 			blk.type = .TREE
 			blk.body = rl.Rectangle {
@@ -154,7 +152,11 @@ update :: proc() {
 	g_mem.spawn_timer -= rl.GetFrameTime()
 
 	if g_mem.spawn_timer <= 0 {
-		spawn_roadblock()
+		rad_f := rand.float32() * 0.5
+		spawn_roadblock({
+			f32(rl.GetScreenWidth()) * (0.2 + rad_f),
+			f32(rl.GetScreenHeight()),
+		})
 		// resets the timer back to spawn rate
 		g_mem.spawn_timer += SPAWN_RATE + g_mem.spawn_timer
 	}
@@ -176,8 +178,9 @@ update :: proc() {
 
 	input = linalg.normalize0(input)
 	g_mem.player_pos += input * rl.GetFrameTime() * g_mem.player_vec
-	g_mem.some_number += 1
-
+	g_mem.player_body.x = g_mem.player_pos.x
+	g_mem.player_body.y = g_mem.player_pos.y
+	
 	if rl.IsKeyPressed(.ESCAPE) {
 		g_mem.run = false
 	}
@@ -246,6 +249,16 @@ draw_player :: proc() {
 	)
 }
 
+draw_player_body :: proc() {
+	rl.DrawRectangleRec(g_mem.player_body, rl.BEIGE)
+}
+
+draw_wall_bodies :: proc() {
+	for wall in g_mem.walls {
+		rl.DrawRectangleRec(wall, rl.Color{0,255,0,128})
+	}
+}
+
 draw :: proc() {
 	rl.BeginDrawing()
 	rl.ClearBackground(rl.BLUE)
@@ -291,6 +304,8 @@ draw :: proc() {
 
 	// rl.BeginMode2D(game_camera())
 	draw_player()
+	draw_player_body()
+	draw_wall_bodies()
 	draw_roadblocks()
 
 
@@ -328,7 +343,7 @@ game_init_window :: proc() {
 @(export)
 game_init :: proc() {
 	g_mem = new(Game_Memory)
-
+	bg_grid_size := f32(16 * BACKGROUND_SCALE)
 	g_mem^ = Game_Memory {
 		run = true,
 		some_number = 100,
@@ -348,7 +363,28 @@ game_init :: proc() {
 		},
 		bg_scroll_vec = {0, -180},
 		rb_id = 0,
+		walls = {
+			rl.Rectangle {
+				x = 0,
+				y = 0,
+				width = bg_grid_size * 6,
+				height = f32(rl.GetScreenHeight()),
+			},
+			rl.Rectangle {
+				x = f32(rl.GetScreenWidth()) - bg_grid_size * 6,
+				y = 0,
+				width = bg_grid_size * 6,
+				height = f32(rl.GetScreenHeight()),
+			},
+		},
 	}
+	g_mem.player_body = rl.Rectangle {
+		x = g_mem.player_pos.x,
+		y = g_mem.player_pos.y,
+		width = f32(g_mem.frame_size * ENTITY_SCALE),
+		height = f32(g_mem.frame_size * ENTITY_SCALE),
+	}
+
 
 	game_hot_reloaded(g_mem)
 }
