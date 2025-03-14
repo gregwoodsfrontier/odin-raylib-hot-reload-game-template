@@ -36,7 +36,7 @@ PIXEL_WINDOW_HEIGHT :: 180
 BACKGROUND_SCALE :: 2
 ENTITY_SCALE :: 4
 MAX_POOL_SIZE :: 100
-SPAWN_RATE :: 2.0
+SPAWN_RATE :: 1.0
 BlockPool :: struct {
     slots:         [MAX_POOL_SIZE]Slot,
     next_free_idx: int, // points to the next free slot
@@ -60,6 +60,7 @@ Roadblock :: struct {
 	vec: rl.Vector2,
 	type: BlockType,
 	body: rl.Rectangle,
+	id: BlockId,
 }
 
 BlockId :: distinct int // just an index into the bullet pool
@@ -173,7 +174,7 @@ update :: proc() {
 			width = 16 * ENTITY_SCALE,
 			height = 16 * ENTITY_SCALE,
 		}
-		block_pool_add(&g_mem.block_pool ,rb)
+		rb.id = block_pool_add(&g_mem.block_pool ,rb)
 		// resets the timer back to spawn rate
 		g_mem.spawn_timer += SPAWN_RATE + g_mem.spawn_timer
 	}
@@ -217,6 +218,10 @@ update :: proc() {
 		if blk, ok :=  &slot.(Roadblock); ok {
 			blk.pos += blk.vec * rl.GetFrameTime()
 			blk.body.x, blk.body.y = blk.pos.x, blk.pos.y
+
+			if blk.body.y <= 10 {
+				block_pool_remove(&g_mem.block_pool, blk.id)
+			}
 		}
 	}
 }
@@ -313,9 +318,10 @@ draw :: proc() {
 	// NOTE: `fmt.ctprintf` uses the temp allocator. The temp allocator is
 	// cleared at the end of the frame by the main application, meaning inside
 	// `main_hot_reload.odin`, `main_release.odin` or `main_web_entry.odin`.
-	t, t_ok := g_mem.block_pool.slots[0].(Roadblock)
+	n_a := g_mem.block_pool.next_free_idx
+	n_b := g_mem.block_pool.n_slots_used
 	rl.DrawText(fmt.ctprintf("some_number: %v\nplayer_pos: %v", g_mem.some_number, g_mem.player_pos), 5, 5, 8, rl.WHITE)
-	rl.DrawText(fmt.ctprintf("pool_vec: %v", t_ok ? t.vec.y : -1), 5, 25, 8, rl.WHITE)
+	rl.DrawText(fmt.ctprintf("next_free: %v\nslots_used: %v", n_a, n_b), 5, 25, 8, rl.WHITE)
 
 	rl.EndMode2D()
 
