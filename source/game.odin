@@ -27,7 +27,7 @@ created.
 
 package game
 
-import "core:fmt"
+// import "core:fmt"
 import "core:math/linalg"
 import "core:math/rand"
 import rl "vendor:raylib"
@@ -37,6 +37,7 @@ BACKGROUND_SCALE :: 2
 ENTITY_SCALE :: 4
 MAX_POOL_SIZE :: 100
 SPAWN_RATE :: 1.0
+TILEMAP_SIZE :: 16
 BlockPool :: struct {
     slots:         [MAX_POOL_SIZE]Slot,
     next_free_idx: int, // points to the next free slot
@@ -49,18 +50,17 @@ Slot :: union #no_nil {
 }
 
 BlockType :: enum {
-	TREE,
-	BRANCH,
-	TRUNK,
-	BIG_TREE,
-	BIG_BRANCH,
+	TREE = 30,
+	BRANCH = 31,
+	TRUNK = 47,
+	BIG_TREE = 6,
+	BIG_BRANCH = 7,
 }
 Roadblock :: struct {
     pos : rl.Vector2,
 	vec: rl.Vector2,
 	type: BlockType,
 	body: rl.Rectangle,
-	id: BlockId,
 }
 
 BlockId :: distinct int // just an index into the bullet pool
@@ -117,6 +117,34 @@ ui_camera :: proc() -> rl.Camera2D {
 	}
 }
 
+set_roadblock_data_rando :: proc() -> Roadblock {
+	// should make it rand the tilemap position instead
+	rad_i := rand.int_max(51)
+	pos := rl.Vector2 {
+		f32(rl.GetScreenWidth()*i32(20+rad_i)/100),
+		f32(rl.GetScreenHeight()),
+	}
+	type := rand.choice_enum(BlockType)
+	vec := g_mem.bg_scroll_vec
+	tile_height := 1
+	if type == .BIG_TREE || type == .BIG_BRANCH {
+		tile_height = 2
+	}
+	b := rl.Rectangle {
+		x = pos.x,
+		y = pos.y,
+		width = f32(TILEMAP_SIZE),
+		height = f32(TILEMAP_SIZE * tile_height),
+	}
+
+	return Roadblock {
+		pos = pos,
+		vec = vec,
+		type = type,
+		body = b,
+	}
+}
+
 block_pool_remove :: proc(using pool: ^BlockPool, id: BlockId) -> (bullet: Roadblock, success: bool) {
     if id < 0 || int(id) >= n_slots_used {
         return {}, false
@@ -134,7 +162,6 @@ block_pool_remove :: proc(using pool: ^BlockPool, id: BlockId) -> (bullet: Roadb
 }
 
 block_pool_add :: proc(using pool : ^BlockPool, block: Roadblock) -> (id: BlockId) {
-	
     if next_free_idx == n_slots_used {
         // add new bullet to the end because all slots[0..n_slots_used] are occupied by bullets, 
         if n_slots_used == MAX_POOL_SIZE do return -1
@@ -159,22 +186,10 @@ update :: proc() {
 
 	if g_mem.spawn_timer <= 0 {
 		// spawn a road block when time is up
-		rad_f := rand.float32() * 0.2
-		rb := Roadblock{
-			pos = {
-				f32(rl.GetScreenWidth()) * (0.2 + rad_f),
-				f32(rl.GetScreenHeight())*0.5,
-			},
-			vec = g_mem.bg_scroll_vec,
-			type = .TREE,
+		for i := 0; i < 2; i += 1 {
+			rb := set_roadblock_data_rando()
+			_ =  block_pool_add(&g_mem.block_pool ,rb)
 		}
-		rb.body = rl.Rectangle {
-			x = rb.pos.x,
-			y = rb.pos.y,
-			width = 16 * ENTITY_SCALE,
-			height = 16 * ENTITY_SCALE,
-		}
-		rb.id = block_pool_add(&g_mem.block_pool ,rb)
 		// resets the timer back to spawn rate
 		g_mem.spawn_timer += SPAWN_RATE + g_mem.spawn_timer
 	}
@@ -214,23 +229,51 @@ update :: proc() {
 	}
 
 	// update all road block position in pool
-	for &slot in g_mem.block_pool.slots {
+	for &slot, idx in g_mem.block_pool.slots[:g_mem.block_pool.n_slots_used] {
+		id := BlockId(idx)
 		if blk, ok :=  &slot.(Roadblock); ok {
 			blk.pos += blk.vec * rl.GetFrameTime()
 			blk.body.x, blk.body.y = blk.pos.x, blk.pos.y
 
 			if blk.body.y <= 10 {
-				block_pool_remove(&g_mem.block_pool, blk.id)
+				block_pool_remove(&g_mem.block_pool, id)
 			}
 		}
 	}
 }
 
 draw_roadblocks :: proc() {
-	pl := g_mem.block_pool.slots
+	pl := g_mem.block_pool.slots[:g_mem.block_pool.n_slots_used]
 	for slot in pl {
 		if blk, ok := slot.(Roadblock); ok {
-			rl.DrawRectangleRec(blk.body, rl.YELLOW)
+			src_rect: rl.Rectangle
+			dest_rect: rl.Rectangle
+			if blk.type != .BIG_BRANCH || blk.type != .BIG_TREE {
+				src_rect = rl.Rectangle {
+					x = 0,
+					y = 0,
+					width = TILEMAP_SIZE,
+					height = TILEMAP_SIZE,
+				}
+			} else {
+				src_rect = rl.Rectangle {
+					x = 0,
+					y = 0,
+					width = TILEMAP_SIZE,
+					height = TILEMAP_SIZE * 2,
+				}
+			}
+			tile_x := int(blk.type)%12
+			tile_y := int(int(blk.type)/12)
+			src_rect.x = f32(TILEMAP_SIZE * tile_x)
+			src_rect.y = f32(TILEMAP_SIZE * tile_y)
+			dest_rect.x = blk.pos.x
+			dest_rect.y = blk.pos.y
+			dest_rect.width = src_rect.width * ENTITY_SCALE
+			dest_rect.height = src_rect.height * ENTITY_SCALE
+
+			rl.DrawTexturePro(g_mem.tilemap_texture, src_rect, dest_rect, {0, 0}, 0, rl.WHITE)
+			// rl.DrawRectangleRec(blk.body, rl.YELLOW)
 		}
 	}
 }
@@ -318,11 +361,8 @@ draw :: proc() {
 	// NOTE: `fmt.ctprintf` uses the temp allocator. The temp allocator is
 	// cleared at the end of the frame by the main application, meaning inside
 	// `main_hot_reload.odin`, `main_release.odin` or `main_web_entry.odin`.
-	n_a := g_mem.block_pool.next_free_idx
-	n_b := g_mem.block_pool.n_slots_used
-	rl.DrawText(fmt.ctprintf("some_number: %v\nplayer_pos: %v", g_mem.some_number, g_mem.player_pos), 5, 5, 8, rl.WHITE)
-	rl.DrawText(fmt.ctprintf("next_free: %v\nslots_used: %v", n_a, n_b), 5, 25, 8, rl.RED)
-
+	//rl.DrawText(fmt.ctprintf("some_number: %v\nplayer_pos: %v", g_mem.some_number, g_mem.player_pos), 5, 5, 8, rl.WHITE)
+	
 	rl.EndMode2D()
 
 	rl.EndDrawing()
