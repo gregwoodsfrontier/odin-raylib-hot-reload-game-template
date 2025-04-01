@@ -349,6 +349,14 @@ draw :: proc() {
 	// rl.BeginMode2D(game_camera())
 	draw_player()
 	draw_roadblocks()
+
+	// debug draw
+	rl.DrawRectangleV({
+		16*2*5,
+		f32(rl.GetScreenHeight()) - 16*2,
+	}, {
+		16*2, 16*2,
+	}, rl.YELLOW)
 	// rl.DrawTextureEx(g_mem.player_texture, g_mem.player_pos, 0, 1, rl.WHITE)
 	// rl.DrawRectangleV({520, 520}, {10, 10}, rl.RED)
 	// rl.DrawRectangleV({530, 520}, {10, 10}, rl.GREEN)
